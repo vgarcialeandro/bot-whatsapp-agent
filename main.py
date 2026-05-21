@@ -1,5 +1,6 @@
 import os
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response, Query
+from fastapi.responses import PlainTextResponse
 
 app = FastAPI()
 
@@ -11,31 +12,27 @@ def home():
 def health():
     return {"status": "healthy"}
 
-@app.get("/webhook")
-def verificar_webhook(request: Request):
+@app.get("/webhook", response_class=PlainTextResponse)
+def verificar_webhook(
+    hub_mode: str = Query(None, alias="hub.mode"),
+    hub_challenge: str = Query(None, alias="hub.challenge"),
+    hub_verify_token: str = Query(None, alias="hub.verify_token")
+):
+    # Monitoreo nativo en consola
+    print("--- SOLICITUD ENTRANTE ---")
+    print("MODO EXTRAÍDO POR FASTAPI:", hub_mode)
+    print("TOKEN EXTRAÍDO POR FASTAPI:", hub_verify_token)
+    print("CHALLENGE EXTRAÍDO:", hub_challenge)
 
-    params = request.query_params
-
-    # 1. Imprimimos en los logs de Azure exactamente qué está llegando de Meta para auditarlo
-    print("MODO RECIBIDO:", params.get("hub.mode"))
-    print("TOKEN RECIBIDO DE META:", params.get("hub.verify_token"))
-    
-    # Coloca aquí en texto plano la misma palabra exacta que configuraste en Meta
     TOKEN_FIJO_DE_PRUEBA = "BotPrueba20260519"
 
-    if (
-        params.get("hub.mode") == "subscribe"
-        and params.get("hub.verify_token") == TOKEN_FIJO_DE_PRUEBA
-    ):
-        return Response(
-            content=params.get("hub.challenge"),
-            media_type="text/plain"
-        )
+    if hub_mode == "subscribe" and hub_verify_token == TOKEN_FIJO_DE_PRUEBA:
+        print("¡ÉXITO TOTAL! Coincidencia perfecta.")
+        return hub_challenge
 
-    return Response(
-        content="Token invalido",
-        status_code=403
-    )
+    print("¡FALLÓ! Los datos siguen llegando vacíos o no coinciden.")
+    return Response(content="Token invalido", status_code=403)
+    
 
 @app.post("/webhook")
 async def recibir_mensaje(request: Request):
