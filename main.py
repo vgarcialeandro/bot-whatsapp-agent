@@ -61,14 +61,27 @@ def verificar_webhook(
 async def recibir_mensaje(request: Request):
     try:
         datos = await request.json()
-        logger.info(f"Mensaje recibido de WhatsApp: {datos}")
+        logger.info(f"Datos recibidos en el webhook: {datos}")
         
-        # Aquí procesarás los mensajes (webhook de notificaciones)
-        # Ejemplo: guardar en base de datos, enviar a otro servicio, etc.
-        
-        return PlainTextResponse(content="OK", status_code=200)
-    
+        # 1. Detectar si los datos vienen envueltos en una lista (común en Event Grid)
+        evento = datos[0] if isinstance(datos, list) and len(datos) > 0 else datos
+
+        # 2. 🔑 CAPTURAR EL APRETÓN DE MANOS (Esto destrabará los 6 minutos en Azure)
+        if evento.get("eventType") == "Microsoft.EventGrid.SubscriptionValidationEvent":
+            validation_code = evento["data"]["validationCode"]
+            logger.info(f"✅ Respondiendo validación de Azure con el código: {validation_code}")
+            return {"validationResponse": validation_code}
+
+        # 3. 💬 CAPTURAR MENSAJES REALES DE WHATSAPP
+        # (Este evento ocurrirá cuando tú o un cliente escriban al número)
+        elif evento.get("eventType") == "Microsoft.Communication.AdvancedMessageReceived":
+            logger.info("💬 ¡Mensaje entrante real de WhatsApp detectado!")
+            
+            # Aquí procesarás el texto con tus agentes de ventas más adelante
+            # datos_mensaje = evento["data"]
+            
+        return Response(status_code=200)
+
     except Exception as e:
-        logger.error(f"Error procesando mensaje webhook: {e}")
-        # Meta exige responder 200 aunque ocurra un error interno
-        return PlainTextResponse(content="OK", status_code=200)
+        logger.error(f"❌ Error interno procesando el webhook: {e}")
+        return Response(status_code=400)
