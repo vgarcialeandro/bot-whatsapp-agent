@@ -5,7 +5,6 @@ from fastapi.responses import PlainTextResponse
 
 app = FastAPI(title="WhatsApp Webhook - Azure Container Apps")
 
-# Configuración de logs para ver todo en tiempo real desde Azure
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -20,6 +19,7 @@ def health():
     return {"status": "healthy"}
 
 
+# ====================== GET /webhook ======================
 @app.get("/webhook", response_class=PlainTextResponse)
 @app.get("/webhook/", response_class=PlainTextResponse)
 def verificar_webhook(
@@ -32,50 +32,49 @@ def verificar_webhook(
     user_agent = request.headers.get("user-agent", "")
 
     logger.info(f"Webhook GET recibido - Query params: {query_params}")
-    logger.info(f"User-Agent: {user_agent}")
 
-    if ("Azure" in user_agent or "HealthCheck" in str(request.url)) and not hub_mode:
+    # Health probe de Azure Container Apps
+    if "Azure" in user_agent or not hub_mode:
         logger.info("Health probe de Azure detectada")
         return PlainTextResponse(content="OK", status_code=200)
 
-    logger.info(f"hub.mode={hub_mode} | hub.verify_token={hub_verify_token} | hub.challenge={hub_challenge}")
-
-    VERIFY_TOKEN = (
-        os.getenv("WHATSAPP_VERIFY_TOKEN") 
-        or os.getenv("VERIFY_TOKEN") 
-        or "BotPrueba20260519"
-    )
+    VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN") or "BotPrueba20260519"
 
     if hub_mode == "subscribe" and hub_verify_token == VERIFY_TOKEN:
-        logger.info("✅ Verificación de Meta (WhatsApp) exitosa")
+        logger.info("✅ Verificación WhatsApp exitosa")
         return PlainTextResponse(content=str(hub_challenge or ""), status_code=200)
 
-    logger.warning("❌ Verificación fallida - Token o modo incorrecto")
+    logger.warning("❌ Verificación fallida")
     return PlainTextResponse(content="Token inválido", status_code=403)
 
 
+# ====================== POST /webhook ======================
 @app.post("/webhook")
 async def recibir_mensaje(request: Request):
     try:
         datos = await request.json()
-        logger.info(f"Datos recibidos en el webhook POST: {datos}")
-        
-        # Detectar si los datos vienen envueltos en una lista (común en Azure Event Grid)
-        evento = datos[0] if isinstance(datos, list) and len(datos) > 0 else datos
+        logger.info(f"Datos recibidos en POST: {datos}")
 
-        # 🔑 APRETÓN DE MANOS DE AZURE (Handshake)
-        if evento.get("eventType") == "Microsoft.EventGrid.SubscriptionValidationEvent":
-            validation_code = evento["data"]["validationCode"]
-            logger.info(f"✅ Respondiendo validación de Azure con código: {validation_code}")
-            return {"validationResponse": validation_code}
+        # Event Grid puede enviar una lista o un objeto único
+        eventos = datos if isinstance(datos, list) else [datos]
 
-        # 💬 MENSAJES REALES DE WHATSAPP (Desde Azure ACS)
-        elif evento.get("eventType") == "Microsoft.Communication.AdvancedMessageReceived":
-            logger.info("💬 ¡Mensaje entrante real de WhatsApp detectado!")
-            # Tu lógica multi-agente se activará aquí abajo
-            
+        for evento in eventos:
+            event_type = evento.get("eventType")
+
+            if event_type == "Microsoft.EventGrid.SubscriptionValidationEvent":
+                validation_code = evento.get("data", {}).get("validationCode")
+                if validation_code:
+                    logger.info(f"✅ Validación Azure OK: {validation_code}")
+                    return {"validationResponse": validation_code}
+
+            elif event_type == "Microsoft.Communication.AdvancedMessageReceived":
+                logger.info("💬 ¡Mensaje de WhatsApp recibido!")
+                # Aquí irá tu lógica multi-agente
+                # data = evento.get("data", {})
+                # ... procesar mensaje
+
         return Response(status_code=200)
 
     except Exception as e:
-        logger.error(f"❌ Error interno procesando el webhook: {e}")
-        return Response(status_code=400)
+        logger.error(f"❌ Error procesando webhook: {e}")
+        return Response(status_code=200)   # Siempre 200 para Event Grid
